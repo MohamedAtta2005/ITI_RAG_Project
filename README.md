@@ -9,7 +9,6 @@ An interactive, single-file HTML/CSS/JS presentation deck illustrating the archi
 ## 🚀 Features
 
 - **🎮 Keyboard & UI Navigation**: Navigate through slides using `Left` / `Right` arrow keys or on-screen controls.
-- **🎨 Modern Dark Mode Tech Aesthetic**: Built with glassmorphism UI cards, glowing gradient accents, and CSS micro-interactions.
 - **⚡ Zero External Dependencies**: 100% standard HTML5, CSS3, and Vanilla JavaScript—works completely offline in any web browser.
 - **🌀 Stranger Things Lore Integration**: Real-world pipeline concepts (chunking, vector embeddings, RAG semantic retrieval) demonstrated using actual Hawkins lore.
 
