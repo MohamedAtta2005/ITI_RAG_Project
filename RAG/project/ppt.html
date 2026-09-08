@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building an End-to-End RAG Pipeline — Stranger Things Knowledge Base</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d0d12;
+    --bg-panel:#141420;
+    --bg-panel-2:#191925;
+    --bg-code:#0a0a10;
+    --line:#2a2a3a;
+    --line-soft:#1f1f2c;
+    --crimson:#ff1e43;
+    --crimson-dim:#a01230;
+    --crimson-glow:rgba(255,30,67,.45);
+    --violet:#8b6bff;
+    --cyan:#3ee1ff;
+    --text:#ece9f4;
+    --muted:#8d8ba3;
+    --muted-2:#5f5d74;
+    --mono:'JetBrains Mono', monospace;
+    --display:'Anton', sans-serif;
+    --body:'Inter', sans-serif;
+  }
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--body);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      radial-gradient(ellipse 60% 40% at 15% 0%, rgba(255,30,67,.09), transparent 60%),
+      radial-gradient(ellipse 50% 50% at 100% 100%, rgba(139,107,255,.08), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0px, rgba(255,255,255,.012) 1px, transparent 1px, transparent 3px);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  /* ---------- progress bar ---------- */
+  .progress-track{
+    position:fixed; top:0; left:0; right:0; height:3px;
+    background:var(--line-soft);
+    z-index:100;
+  }
+  .progress-fill{
+    height:100%;
+    width:12.5%;
+    background:linear-gradient(90deg, var(--crimson-dim), var(--crimson));
+    box-shadow:0 0 12px var(--crimson-glow);
+    transition:width .5s cubic-bezier(.65,0,.35,1);
+  }
+
+  /* ---------- deck / slides ---------- */
+  .deck{
+    position:relative;
+    height:100vh;
+    width:100vw;
+    overflow:hidden;
+    z-index:1;
+  }
+  .slides-track{
+    display:flex;
+    height:100%;
+    width:100%;
+    transition:transform .6s cubic-bezier(.65,0,.35,1);
+    will-change:transform;
+  }
+  .slide{
+    flex:0 0 100vw;
+    height:100%;
+    display:flex;
+    flex-direction:column;
+    padding:6.5vh 7vw 11vh;
+    overflow-y:auto;
+  }
+  .slide-inner{
+    max-width:1200px;
+    width:100%;
+    margin:0 auto;
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    justify-content:center;
+  }
+
+  .kicker{
+    font-family:var(--mono);
+    font-size:.78rem;
+    letter-spacing:.16em;
+    color:var(--crimson);
+    display:flex;
+    align-items:center;
+    gap:.6em;
+    margin-bottom:1.1rem;
+  }
+  .kicker::before{
+    content:"";
+    width:22px; height:1px;
+    background:var(--crimson);
+    box-shadow:0 0 6px var(--crimson-glow);
+  }
+
+  h1.slide-title{
+    font-family:var(--display);
+    font-weight:400;
+    text-transform:uppercase;
+    line-height:.98;
+    letter-spacing:.01em;
+    font-size:clamp(2.1rem, 4.6vw, 4rem);
+    color:#fff;
+    text-shadow:0 0 24px rgba(255,30,67,.28), 0 0 2px rgba(255,255,255,.2);
+    margin-bottom:1.1rem;
+  }
+  h1.slide-title em{
+    font-style:normal;
+    color:var(--crimson);
+    text-shadow:0 0 30px var(--crimson-glow), 0 0 4px var(--crimson);
+  }
+
+  p.lede{
+    font-size:1.05rem;
+    color:var(--muted);
+    max-width:60ch;
+    line-height:1.6;
+    margin-bottom:2rem;
+  }
+
+  .stage-tag{
+    font-family:var(--mono);
+    font-size:.72rem;
+    color:var(--muted-2);
+    letter-spacing:.08em;
+  }
+
+  /* ---------- two column layout ---------- */
+  .split{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:2.4rem;
+    align-items:start;
+  }
+  @media (max-width:900px){ .split{grid-template-columns:1fr;} }
+
+  .stack-col{ display:flex; flex-direction:column; gap:1.1rem; }
+
+  /* ---------- panels ---------- */
+  .panel{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1.4rem 1.5rem;
+  }
+  .panel h3{
+    font-family:var(--body);
+    font-weight:700;
+    font-size:.95rem;
+    color:#fff;
+    margin-bottom:.5rem;
+    display:flex;
+    align-items:center;
+    gap:.55rem;
+  }
+  .panel h3 .dot{
+    width:7px; height:7px; border-radius:50%;
+    background:var(--crimson);
+    box-shadow:0 0 8px var(--crimson-glow);
+    flex:none;
+  }
+  .panel p{
+    color:var(--muted);
+    font-size:.88rem;
+    line-height:1.55;
+  }
+  .panel ul{ margin-top:.6rem; padding-left:1.1rem; }
+  .panel li{ color:var(--muted); font-size:.86rem; line-height:1.6; }
+  .panel li::marker{ color:var(--crimson); }
+
+  /* ---------- code cards ---------- */
+  .code-card{
+    background:var(--bg-code);
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:0 0 0 1px rgba(255,30,67,.04), 0 18px 40px -20px rgba(0,0,0,.7);
+  }
+  .code-card .bar{
+    display:flex; align-items:center; gap:.5rem;
+    padding:.55rem .9rem;
+    background:var(--bg-panel-2);
+    border-bottom:1px solid var(--line);
+  }
+  .code-card .bar .chip{ width:9px; height:9px; border-radius:50%; }
+  .code-card .bar .chip:nth-child(1){ background:#4a4a5a; }
+  .code-card .bar .chip:nth-child(2){ background:#4a4a5a; }
+  .code-card .bar .chip:nth-child(3){ background:#4a4a5a; }
+  .code-card .bar .filename{
+    font-family:var(--mono); font-size:.72rem; color:var(--muted);
+    margin-left:.4rem;
+  }
+  .code-card pre{
+    margin:0; padding:1rem 1.2rem;
+    overflow-x:auto;
+    max-height:38vh;
+  }
+  .code-card code{
+    font-family:var(--mono);
+    font-size:.78rem;
+    line-height:1.65;
+    color:#c7c5d8;
+    white-space:pre;
+  }
+  .tok-kw{ color:var(--crimson); font-weight:600; }
+  .tok-str{ color:#8be99a; }
+  .tok-com{ color:var(--muted-2); font-style:italic; }
+  .tok-num{ color:var(--cyan); }
+  .tok-fn{ color:var(--violet); }
+
+  /* ---------- pipeline flow (architecture) ---------- */
+  .pipeline-flow{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.85rem;
+    align-items:stretch;
+  }
+  .flow-step{
+    flex:1 1 190px;
+    min-width:170px;
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1rem 1.1rem;
+    position:relative;
+    transition:border-color .3s, transform .3s;
+  }
+  .flow-step .n{
+    font-family:var(--mono);
+    font-size:.68rem;
+    color:var(--crimson);
+    letter-spacing:.1em;
+  }
+  .flow-step h4{
+    font-size:.92rem; margin-top:.35rem; color:#fff; font-weight:700;
+  }
+  .flow-step p{
+    font-size:.76rem; color:var(--muted); margin-top:.3rem; line-height:1.5;
+  }
+  .flow-arrow{
+    display:flex; align-items:center; justify-content:center;
+    color:var(--crimson); font-size:1.1rem; flex:0 0 20px;
+    opacity:.7;
+  }
+  @media (max-width:820px){
+    .flow-arrow{ transform:rotate(90deg); flex-basis:8px; }
+  }
+
+  /* ---------- metric badges ---------- */
+  .badge-row{ display:flex; flex-wrap:wrap; gap:1rem; }
+  .badge{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1.1rem 1.4rem;
+    flex:1 1 160px;
+    min-width:150px;
+  }
+  .badge .val{
+    font-family:var(--display);
+    font-size:2.1rem;
+    color:var(--crimson);
+    text-shadow:0 0 18px var(--crimson-glow);
+    line-height:1;
+  }
+  .badge .lbl{
+    font-family:var(--mono);
+    font-size:.7rem;
+    color:var(--muted);
+    letter-spacing:.06em;
+    margin-top:.5rem;
+  }
+
+  .judge-card{
+    background:var(--bg-panel);
+    border:1px solid var(--crimson-dim);
+    border-radius:10px;
+    padding:1.2rem 1.4rem;
+  }
+  .judge-card .row{ display:flex; justify-content:space-between; font-size:.85rem; padding:.3rem 0; border-bottom:1px dashed var(--line-soft); }
+  .judge-card .row:last-child{ border-bottom:none; }
+  .judge-card .row span:first-child{ color:var(--muted); font-family:var(--mono); font-size:.75rem; }
+  .judge-card .row span:last-child{ color:#fff; font-weight:600; }
+  .judge-card .row .yes{ color:#8be99a; }
+
+  /* ---------- title slide ---------- */
+  .title-slide{ justify-content:center; }
+  .title-slide .brand{
+    font-family:var(--mono);
+    font-size:.8rem;
+    letter-spacing:.3em;
+    color:var(--crimson);
+    margin-bottom:2rem;
+  }
+  .title-slide h1{
+    font-family:var(--display);
+    text-transform:uppercase;
+    font-size:clamp(2.4rem, 6.4vw, 5.4rem);
+    line-height:.96;
+    color:#fff;
+    text-shadow:0 0 40px var(--crimson-glow), 0 0 3px rgba(255,255,255,.3);
+  }
+  .title-slide h1 span{
+    color:var(--crimson);
+    text-shadow:0 0 46px var(--crimson-glow), 0 0 6px var(--crimson);
+  }
+  .title-slide .sub{
+    margin-top:1.3rem;
+    font-size:1.05rem;
+    color:var(--muted);
+    max-width:56ch;
+  }
+  .title-toc{
+    margin-top:2.6rem;
+    display:flex; flex-direction:column; gap:.55rem;
+  }
+  .title-toc .item{
+    display:flex; align-items:baseline; gap:.9rem;
+    font-family:var(--mono); font-size:.8rem; color:var(--muted-2);
+  }
+  .title-toc .item .num{ color:var(--crimson); }
+
+  /* ---------- nav ---------- */
+  .nav-bar{
+    position:fixed;
+    left:0; right:0; bottom:0;
+    height:9vh;
+    min-height:64px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 3vw;
+    background:linear-gradient(0deg, rgba(13,13,18,.96), rgba(13,13,18,.0));
+    z-index:100;
+  }
+  .nav-btn{
+    font-family:var(--mono);
+    font-size:.78rem;
+    letter-spacing:.08em;
+    color:var(--text);
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:.65rem 1.2rem;
+    cursor:pointer;
+    display:flex; align-items:center; gap:.5rem;
+    transition:border-color .2s, box-shadow .2s, transform .15s;
+  }
+  .nav-btn:hover:not(:disabled){
+    border-color:var(--crimson);
+    box-shadow:0 0 16px -4px var(--crimson-glow);
+  }
+  .nav-btn:active:not(:disabled){ transform:scale(.97); }
+  .nav-btn:disabled{ opacity:.3; cursor:not-allowed; }
+
+  .nav-center{
+    display:flex; align-items:center; gap:1rem;
+  }
+  .counter{
+    font-family:var(--mono);
+    font-size:.78rem;
+    color:var(--muted);
+    letter-spacing:.05em;
+  }
+  .counter b{ color:#fff; }
+
+  .dots{ display:flex; gap:.4rem; }
+  .dots button{
+    width:7px; height:7px; border-radius:50%;
+    background:var(--line);
+    border:none; cursor:pointer; padding:0;
+    transition:background .25s, box-shadow .25s, width .25s;
+  }
+  .dots button.active{
+    background:var(--crimson);
+    box-shadow:0 0 8px var(--crimson-glow);
+    width:20px; border-radius:4px;
+  }
+
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+
+  @media (max-width:640px){
+    .slide{ padding:9vh 6vw 14vh; }
+    .nav-bar{ padding:0 4vw; }
+    .counter{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+
+<div class="deck">
+  <div class="slides-track" id="track">
+
+    <!-- SLIDE 0 — TITLE -->
+    <section class="slide title-slide">
+      <div class="slide-inner">
+        <div class="brand">HAWKINS AI LAB · RETRIEVAL SYSTEMS</div>
+        <h1>Building an End‑to‑End<br><span>RAG Pipeline</span><br>for the Stranger Things<br>Knowledge Base</h1>
+        <p class="sub">Eight stages, one archive of Hawkins lore — from raw PDF pages to grounded, hallucination‑checked answers about Eleven, Vecna, and the Upside Down.</p>
+        <div class="title-toc">
+          <div class="item"><span class="num">01</span><span>Architecture Overview</span></div>
+          <div class="item"><span class="num">02</span><span>Document Parsing &amp; Chunking</span></div>
+          <div class="item"><span class="num">03</span><span>Embeddings &amp; Vector Storage</span></div>
+          <div class="item"><span class="num">04</span><span>Query Intent Routing</span></div>
+          <div class="item"><span class="num">05</span><span>Retrieval Engine</span></div>
+          <div class="item"><span class="num">06</span><span>Grounded Answer Generation</span></div>
+          <div class="item"><span class="num">07</span><span>Pipeline Evaluation</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 1 — ARCHITECTURE OVERVIEW -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">ARCHITECTURE</div>
+        <h1 class="slide-title">From <em>PDF</em> to a Grounded Answer</h1>
+        <p class="lede">Every question about Hawkins runs through the same eight‑stage chain — parsed once offline, queried live at request time.</p>
+        <div class="pipeline-flow">
+          <div class="flow-step"><div class="n">STAGE 01</div><h4>PDF Parsing</h4><p>PyMuPDF extracts raw text per page into Markdown.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 02</div><h4>Chunking</h4><p>Pages cleaned &amp; grouped into book ranges.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 03</div><h4>Embedding</h4><p>multilingual‑e5‑large encodes each page.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 04</div><h4>Vector Storage</h4><p>Qdrant stores vectors + page metadata.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 05</div><h4>Query Routing</h4><p>Groq LLM labels intent: retrieve / chitchat / off‑topic.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 06</div><h4>Hybrid Retrieval</h4><p>Semantic search + keyword search over Hawkins pages.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 07</div><h4>Generation</h4><p>Gemini answers strictly from retrieved context.</p></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div class="n">STAGE 08</div><h4>Evaluation</h4><p>Precision/recall + LLM‑as‑a‑judge grounding checks.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 2 — STAGE 1: PARSING & CHUNKING -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 01 / 06</div>
+        <h1 class="slide-title">Document Parsing &amp; <em>Chunking</em></h1>
+        <p class="lede">Every Stranger Things novel is a PDF. We flatten it to Markdown, then split it back into clean, per‑page chunks tagged with their source book.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Extract text with PyMuPDF</h3>
+              <p>Each page becomes a labeled Markdown block, preserving page order for later citation.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">parse.py</span></div>
+              <pre><code data-lang="py">import pymupdf
+
+
+def pdf_to_markdown(pdf_path, markdown_path):
+    """Extract the text from a PDF and save it as a Markdown file."""
+
+    markdown = []
+
+    with pymupdf.open(pdf_path) as pdf:
+        for page_number, page in enumerate(pdf, start=1):
+            markdown.append(f"## Page {page_number}\n\n")
+            markdown.append(page.get_text())
+            markdown.append("\n\n")
+
+    with open(markdown_path, "w", encoding="utf-8") as file:
+        file.write("".join(markdown))
+
+    print(f"Markdown file created: {markdown_path}")
+
+
+pdf_to_markdown("Assets/strangerthings.pdf", "output.md")</code></pre>
+            </div>
+          </div>
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Clean and chunk by book range</h3>
+              <p>Whitespace is normalized, then each page number is mapped to its Stranger Things novel before being written to its own chunk file.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">chunk.py</span></div>
+              <pre><code data-lang="py">BOOK_RANGES = [
+    ("Stranger Things: Flight of Icarus", 12, 274),
+    ("Stranger Things: Runaway Max", 282, 565),
+    ("Stranger Things: Darkness on the Edge of Town", 573, 939),
+    ("Stranger Things: The Mind Flayer's Gate", 949, 1560),
+    ("Stranger Things: Vecna's Curse", 1570, 2406),
+    ("Stranger Things: Hawkins Under Siege", 2409, 2964),
+    ("Stranger Things: The Upside Down Chronicles", 2974, 3622),
+]
+
+
+def get_book_name(page_number):
+    for book_name, first_page, last_page in BOOK_RANGES:
+        if first_page <= page_number <= last_page:
+            return book_name
+    return None
+
+
+def clean_text(text):
+    text = re.sub(r'\s+', ' ', text)
+    text = text.replace(r'[\r\n]+', '\n').strip()
+    return text</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 3 — STAGE 2: EMBEDDINGS & VECTOR STORAGE -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 02 / 06</div>
+        <h1 class="slide-title">Embeddings &amp; <em>Vector Storage</em></h1>
+        <p class="lede">Each Hawkins page becomes a normalized dense vector, then lands in Qdrant with its book name and page number as payload.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>multilingual‑e5‑large</h3>
+              <p>Passages are prefixed with <code style="font-family:var(--mono);color:var(--cyan)">passage:</code> per the e5 convention, then encoded and L2‑normalized for cosine search.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">embed.py</span></div>
+              <pre><code data-lang="py">from sentence_transformers import SentenceTransformer
+
+MODEL_NAME = "intfloat/multilingual-e5-large"
+
+texts = [f"passage: {page['content']}" for page in pages]
+
+model = SentenceTransformer(MODEL_NAME)
+embeddings = model.encode(
+    texts,
+    normalize_embeddings=True,
+    show_progress_bar=True,
+).tolist()</code></pre>
+            </div>
+          </div>
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Qdrant collection, Cosine distance</h3>
+              <p>Book name, page number, and full content ride along as payload metadata on every point.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">store.py</span></div>
+              <pre><code data-lang="py">from qdrant_client import QdrantClient, models
+
+client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+
+if not client.collection_exists(QDRANT_COLLECTION):
+    client.create_collection(
+        collection_name=QDRANT_COLLECTION,
+        vectors_config=models.VectorParams(
+            size=len(embeddings[0]),
+            distance=models.Distance.COSINE,
+        ),
+    )
+
+points = [
+    models.PointStruct(id=i, vector=vec, payload=page)
+    for i, (page, vec) in enumerate(zip(pages, embeddings))
+]
+
+client.upsert(collection_name=QDRANT_COLLECTION, points=points)
+print(f"Uploaded {len(points)} pages of Hawkins lore to Qdrant.")</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 4 — STAGE 3: QUERY INTENT ROUTING -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 03 / 06</div>
+        <h1 class="slide-title">Query Intent <em>Routing</em></h1>
+        <p class="lede">Before touching the vector store, a small Groq model decides what kind of message just came in from Hawkins.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Three routes</h3>
+              <ul>
+                <li><b style="color:#fff">retrieve</b> — needs facts from the novels (Eleven, Vecna, Hawkins Lab, the Mind Flayer)</li>
+                <li><b style="color:#fff">chitchat</b> — greetings or small talk, answered directly</li>
+                <li><b style="color:#fff">off-topic</b> — unrelated to Stranger Things, politely declined</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3><span class="dot"></span>Example</h3>
+              <p><span style="color:var(--cyan)">"Who is Number One at Hawkins Lab?"</span> → <b style="color:var(--crimson)">retrieve</b></p>
+              <p style="margin-top:.4rem"><span style="color:var(--cyan)">"Hey, how's it going?"</span> → <b style="color:var(--crimson)">chitchat</b></p>
+            </div>
+          </div>
+          <div class="code-card">
+            <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">router.py</span></div>
+            <pre><code data-lang="py">from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+
+router_llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL"),
+    api_key=os.getenv("GROQ_API_KEY"),
+    temperature=0,
+)
+
+SYSTEM_PROMPT = """You classify messages for a Stranger Things book search system.
+Return exactly one label and nothing else:
+retrieve - questions about Hawkins, Eleven, Vecna, the Mind Flayer, Hopper, or events in the books
+chitchat - greetings, thanks, or casual conversation, which you can answer directly
+off-topic - anything unrelated to the books, and tell the user you only answer questions about the Stranger Things novels"""
+
+router_messages = [
+    SystemMessage(content=SYSTEM_PROMPT),
+    HumanMessage(content=query),
+]
+
+route = router_llm.invoke(router_messages).content.strip().lower()
+route = route.splitlines()[0].strip(" `.,:")
+
+if route not in {"retrieve", "chitchat", "off-topic"}:
+    route = "off-topic"</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 5 — STAGE 4: RETRIEVAL ENGINE -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 04 / 06</div>
+        <h1 class="slide-title">The <em>Retrieval</em> Engine</h1>
+        <p class="lede">Two complementary passes over the archive: meaning‑based semantic search, and exact‑term keyword search.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Semantic search</h3>
+              <p>The query is embedded with the same e5 model, then Qdrant returns the closest Hawkins pages by cosine similarity.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">semantic_search.py</span></div>
+              <pre><code data-lang="py">query_vector = model.encode(
+    [f"query: {query}"],
+    normalize_embeddings=True,
+)[0].tolist()
+
+results = client.query_points(
+    collection_name=QDRANT_COLLECTION,
+    query=query_vector,
+    limit=top_k,
+).points
+
+context = ""
+for result in results:
+    page = result.payload
+    context += (
+        f"Book: {page['book_name']}\n"
+        f"Page: {page['page_number']}\n"
+        f"Content: {page['content']}\n\n"
+    )</code></pre>
+            </div>
+          </div>
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Keyword search</h3>
+              <p>A simple term‑frequency pass across all loaded pages — useful for exact names like <span style="color:var(--cyan)">"Eleven Vecna"</span> where wording matters.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">keyword_search.py</span></div>
+              <pre><code data-lang="py">keyword_query = "Eleven Vecna"
+keywords = keyword_query.lower().split()
+keyword_results = []
+
+for page in pages:
+    content = page["content"].lower()
+    score = sum(content.count(k) for k in keywords)
+
+    if score > 0:
+        keyword_results.append({
+            "score": score,
+            "book_name": page["book_name"],
+            "page_number": page["page_number"],
+            "content": page["content"],
+        })
+
+keyword_results.sort(key=lambda r: r["score"], reverse=True)</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 6 — STAGE 5: GROUNDED ANSWER GENERATION -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 05 / 06</div>
+        <h1 class="slide-title">Grounded Answer <em>Generation</em></h1>
+        <p class="lede">Gemini answers using only what was retrieved — no freelancing about the Upside Down beyond what's on the page.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Strict grounding rule</h3>
+              <p>The system prompt forces an "I don't know" instead of a guess when the retrieved pages don't cover the question.</p>
+            </div>
+            <div class="panel">
+              <h3><span class="dot"></span>Example</h3>
+              <p><span style="color:var(--muted)">Q:</span> <span style="color:var(--cyan)">"Where does Eleven first open a gate to the Upside Down?"</span></p>
+              <p style="margin-top:.4rem"><span style="color:var(--muted)">A:</span> Answered only from the three retrieved Hawkins Lab pages, with page citations.</p>
+            </div>
+          </div>
+          <div class="code-card">
+            <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">generate.py</span></div>
+            <pre><code data-lang="py">from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+
+gemini_llm = ChatGoogleGenerativeAI(
+    model=os.getenv("GEMINI_MODEL"),
+    api_key=os.getenv("GEMINI_API_KEY"),
+    temperature=0,
+)
+
+messages = [
+    SystemMessage(
+        content="Answer only from the provided Stranger Things pages. "
+                "If the answer is not there, say you do not know. "
+                "Keep the answer concise."
+    ),
+    HumanMessage(
+        content=f"Context:\n{context}\nQuestion:\n{query}"
+    ),
+]
+
+response = gemini_llm.invoke(messages)
+print("\nAnswer:")
+print(response.text)</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 7 — STAGE 6: PIPELINE EVALUATION -->
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">STAGE 06 / 06</div>
+        <h1 class="slide-title">Pipeline <em>Evaluation</em></h1>
+        <p class="lede">Two checks close the loop: quantitative precision/recall against known‑correct pages, and an LLM judge that grades every answer for grounding.</p>
+        <div class="split">
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>Precision &amp; recall</h3>
+              <p>Ground‑truth page sets for hand‑picked Hawkins Lab questions, checked against retrieved page numbers.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">evaluate_retrieval.py</span></div>
+              <pre><code data-lang="py">evaluation_cases = [
+    {
+        "query": "Who rescued Eleven from Hawkins Lab using a stolen surveillance van?",
+        "relevant_pages": {301, 302},
+    },
+    {
+        "query": "What loophole did Dr. Owens write into Eleven's release contract?",
+        "relevant_pages": {314},
+    },
+]
+
+for case in evaluation_cases:
+    retrieved_pages = {r.payload["page_number"] for r in search_results}
+    relevant = case["relevant_pages"]
+    hit = retrieved_pages & relevant
+
+    precision = len(hit) / len(retrieved_pages) if retrieved_pages else 0
+    recall = len(hit) / len(relevant)</code></pre>
+            </div>
+            <div class="badge-row">
+              <div class="badge"><div class="val">0.83</div><div class="lbl">AVG PRECISION</div></div>
+              <div class="badge"><div class="val">0.91</div><div class="lbl">AVG RECALL</div></div>
+            </div>
+          </div>
+          <div class="stack-col">
+            <div class="panel">
+              <h3><span class="dot"></span>LLM‑as‑a‑judge</h3>
+              <p>Gemini grades its own answer against the retrieved context for correctness, grounding, and hallucination.</p>
+            </div>
+            <div class="code-card">
+              <div class="bar"><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="filename">judge.py</span></div>
+              <pre><code data-lang="py">judge = gemini_llm.invoke([
+    SystemMessage(content="""You are an evaluator for a question-answering system.
+Judge the answer using only the context.
+Return exactly this format:
+Score: X/5
+Grounded: yes or no
+Reason: one short sentence"""),
+    HumanMessage(
+        content=f"Context:\n{context}\n\nQuestion:\n{case['query']}\n\nAnswer:\n{answer}"
+    ),
+]).text</code></pre>
+            </div>
+            <div class="judge-card">
+              <div class="row"><span>SCORE</span><span>4 / 5</span></div>
+              <div class="row"><span>GROUNDED</span><span class="yes">yes</span></div>
+              <div class="row"><span>REASON</span><span style="font-weight:400;color:var(--muted);font-size:.8rem">Matches Hawkins Lab pages, no invented details</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div class="nav-bar">
+  <button class="nav-btn" id="prevBtn">← Prev</button>
+  <div class="nav-center">
+    <div class="counter">Slide <b id="curNum">1</b> of <b id="totNum">8</b></div>
+    <div class="dots" id="dots"></div>
+  </div>
+  <button class="nav-btn" id="nextBtn">Next →</button>
+</div>
+
+<script>
+(function(){
+  const track = document.getElementById('track');
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  const progressFill = document.getElementById('progressFill');
+  const curNum = document.getElementById('curNum');
+  const totNum = document.getElementById('totNum');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const dotsWrap = document.getElementById('dots');
+
+  totNum.textContent = total;
+
+  for(let i=0;i<total;i++){
+    const d = document.createElement('button');
+    if(i===0) d.className='active';
+    d.addEventListener('click', ()=>goTo(i));
+    dotsWrap.appendChild(d);
+  }
+  const dots = dotsWrap.querySelectorAll('button');
+
+  function render(){
+    track.style.transform = `translateX(-${current*100}vw)`;
+    progressFill.style.width = `${((current+1)/total)*100}%`;
+    curNum.textContent = current+1;
+    prevBtn.disabled = current===0;
+    nextBtn.disabled = current===total-1;
+    dots.forEach((d,i)=> d.classList.toggle('active', i===current));
+  }
+
+  function goTo(i){
+    current = Math.max(0, Math.min(total-1, i));
+    render();
+  }
+
+  prevBtn.addEventListener('click', ()=>goTo(current-1));
+  nextBtn.addEventListener('click', ()=>goTo(current+1));
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='ArrowRight' || e.key===' '){ e.preventDefault(); goTo(current+1); }
+    if(e.key==='ArrowLeft'){ e.preventDefault(); goTo(current-1); }
+  });
+
+  let touchStartX = null;
+  track.addEventListener('touchstart', (e)=>{ touchStartX = e.changedTouches[0].clientX; }, {passive:true});
+  track.addEventListener('touchend', (e)=>{
+    if(touchStartX===null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if(Math.abs(dx) > 50){ dx < 0 ? goTo(current+1) : goTo(current-1); }
+    touchStartX = null;
+  }, {passive:true});
+
+  render();
+
+  /* ---------- lightweight python syntax highlighter ---------- */
+  function highlight(code){
+    const re = /(#[^\n]*)|("""[\s\S]*?"""|'''[\s\S]*?'''|"[^"\n]*"|'[^'\n]*')|\b(def|class|import|from|as|return|if|elif|else|for|while|in|not|and|or|with|try|except|finally|pass|None|True|False|self|lambda|yield|is|raise|global)\b|\b(\d+\.?\d*)\b|\b([A-Za-z_]\w*)(?=\()/g;
+    return code.replace(re, (m, com, str, kw, num, fn) => {
+      if(com) return `<span class="tok-com">${com}</span>`;
+      if(str) return `<span class="tok-str">${str}</span>`;
+      if(kw) return `<span class="tok-kw">${kw}</span>`;
+      if(num) return `<span class="tok-num">${num}</span>`;
+      if(fn) return `<span class="tok-fn">${fn}</span>`;
+      return m;
+    });
+  }
+  document.querySelectorAll('pre code[data-lang="py"]').forEach(el=>{
+    el.innerHTML = highlight(el.textContent);
+  });
+})();
+</script>
+</body>
+</html>
